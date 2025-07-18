@@ -13,13 +13,13 @@ passport.deserializeUser(async (id, done) => {
   done(null, user);
 });
 
-// GOOGLE STRATEGY
+// ✅ GOOGLE STRATEGY
 passport.use(
   new GoogleStrategy(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: "/api/auth/google/callback",
+      callbackURL: process.env.GOOGLE_CALLBACK_URL, // ✅ Absolute URL from .env
     },
     async (accessToken, refreshToken, profile, done) => {
       const existing = await User.findOne({ email: profile.emails[0].value });
@@ -38,13 +38,13 @@ passport.use(
   )
 );
 
-// GITHUB STRATEGY
+// ✅ GITHUB STRATEGY
 passport.use(
   new GitHubStrategy(
     {
       clientID: process.env.GITHUB_CLIENT_ID,
       clientSecret: process.env.GITHUB_CLIENT_SECRET,
-      callbackURL: "/api/auth/github/callback",
+      callbackURL: process.env.GITHUB_CALLBACK_URL, // ✅ Absolute URL from .env
       scope: ["user:email"],
     },
     async (accessToken, refreshToken, profile, done) => {
