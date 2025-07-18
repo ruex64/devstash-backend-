@@ -28,7 +28,7 @@ router.get("/google/callback", passport.authenticate("google", {
       secure: process.env.NODE_ENV === "production",
       sameSite: "Lax",
     })
-    .redirect(`${CLIENT_URL}/auth/redirect`);
+    .redirect(`${CLIENT_URL}`);
 });
 
 // ✅ GitHub OAuth entry point
@@ -55,7 +55,7 @@ router.get("/github/callback", passport.authenticate("github", {
       secure: process.env.NODE_ENV === "production",
       sameSite: "Lax",
     })
-    .redirect(`${CLIENT_URL}/auth/redirect`);
+    .redirect(`${CLIENT_URL}`);
 });
 
 module.exports = router;
