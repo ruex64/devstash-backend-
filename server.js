@@ -35,12 +35,12 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // ✅ Routes
-app.use("/api/auth", require("./routes/auth"));   // Local auth
-app.use("/api/auth", require("./routes/oauth"));  // Google/GitHub auth
-app.use("/api/components", require("./routes/component"));
-app.use("/api/users", require("./routes/user"));
+app.use("/auth", require("./routes/auth"));   // Local auth
+app.use("/auth", require("./routes/oauth"));  // Google/GitHub auth
+app.use("/components", require("./routes/component"));
+app.use("/users", require("./routes/user"));
 const adminRoutes = require("./routes/admin");
-app.use("/api/admin", adminRoutes);
+app.use("/admin", adminRoutes);
 
 // ✅ MongoDB & Server start
 const mongoose = require("mongoose");
