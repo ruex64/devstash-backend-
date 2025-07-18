@@ -11,16 +11,10 @@ dotenv.config();
 // ✅ Initialize Express app
 const app = express();
 
-// ✅ Load allowed origins from .env and convert to array
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-
+// ✅ CORS: Allow all origins (dev-friendly, no env)
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS: ' + origin));
-    }
+    callback(null, true); // Allow all origins
   },
   credentials: true
 }));
