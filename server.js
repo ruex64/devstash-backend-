@@ -5,20 +5,23 @@ const cookieParser = require("cookie-parser");
 const passport = require("passport");
 const session = require("express-session");
 
-// Load env vars
+// ✅ Load environment variables
 dotenv.config();
 
-// ✅ INIT EXPRESS APP
+// ✅ Initialize Express app
 const app = express();
 
-// ✅ Middleware Setup (CORS, JSON, Cookies)
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+// ✅ Clean CLIENT_URL (remove trailing slash if present)
+const cleanClientUrl = process.env.CLIENT_URL?.replace(/\/$/, "");
+
+// ✅ Middleware
+app.use(cors({ origin: cleanClientUrl, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
-// ✅ Session and Passport
+// ✅ Session and Passport configuration
 app.use(session({
-  secret: "devstash_secret",
+  secret: process.env.SESSION_SECRET || "devstash_secret",
   resave: false,
   saveUninitialized: true,
 }));
@@ -28,22 +31,19 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // ✅ Routes
-app.use("/api/auth", require("./routes/auth"));   // Local auth
-app.use("/api/auth", require("./routes/oauth"));  // Google/GitHub auth
-app.use("/api/components", require("./routes/component"));
-app.use("/api/users", require("./routes/user"));
-const adminRoutes = require("./routes/admin");
-app.use("/api/admin", adminRoutes);
+app.use("/auth", require("./routes/auth"));     // Email/password auth
+app.use("/auth", require("./routes/oauth"));    // Google/GitHub OAuth
+app.use("/components", require("./routes/component"));
+app.use("/users", require("./routes/user"));
+app.use("/admin", require("./routes/admin"));
 
-
-
-// ✅ MongoDB & Server Start
+// ✅ MongoDB connection and server start
 const mongoose = require("mongoose");
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
     app.listen(process.env.PORT, () => {
-      console.log(`Server running on port ${process.env.PORT}`);
+      console.log(`✅ Server running on port ${process.env.PORT}`);
     });
   })
-  .catch((err) => console.error("DB Error:", err));
+  .catch((err) => console.error("❌ MongoDB connection error:", err));
