@@ -1,128 +1,186 @@
-const User = require("../models/User");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const {
-  generateAccessToken,
-  generateRefreshToken,
-} = require("../utils/generateTokens");
-const generateSlug = require("../utils/generateSlug"); // <-- Import slug generator
+const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+const { OAuth2Client } = require('google-auth-library');
 
-// Register a user (email + password)
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Helper function to generate a JWT
+const generateToken = (id) => {
+    return jwt.sign({ id }, process.env.JWT_SECRET, {
+        expiresIn: '30d',
+    });
+};
+
+// @desc    Register a new user
+// @route   POST /api/auth/register
 exports.register = async (req, res) => {
-  try {
     const { name, email, password } = req.body;
 
-    const existing = await User.findOne({ email });
-    if (existing) return res.status(409).json({ message: "User already exists" });
+    try {
+        const userExists = await User.findOne({ email });
 
-    const hashed = await bcrypt.hash(password, 10);
+        if (userExists) {
+            return res.status(400).json({ message: 'User already exists' });
+        }
 
-    const isMainAdmin =
-      email === process.env.MAIN_ADMIN_EMAIL &&
-      password === process.env.MAIN_ADMIN_PASSWORD;
+        const user = await User.create({ name, email, password });
 
-    const slug = generateSlug(name);
-
-    const user = await User.create({
-      name,
-      slug,
-      email,
-      password: hashed,
-      role: isMainAdmin ? "admin" : "viewer",
-      provider: "local",
-    });
-
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    res
-      .cookie("accessToken", accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "Lax",
-      })
-      .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "Lax",
-      })
-      .json({
-        user: {
-          id: user._id,
-          name: user.name,
-          slug: user.slug,
-          role: user.role,
-        },
-      });
-  } catch (err) {
-    console.error("Register Error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
+        if (user) {
+            res.status(201).json({
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                token: generateToken(user._id),
+            });
+        } else {
+            res.status(400).json({ message: 'Invalid user data' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error' });
+    }
 };
 
-// Login (email + password)
+// @desc    Authenticate user & get token (Email/Password Login)
+// @route   POST /api/auth/login
 exports.login = async (req, res) => {
-  try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: "User not found" });
+    try {
+        const user = await User.findOne({ email });
 
-    if (user.provider !== "local")
-      return res.status(403).json({ message: `Login with ${user.provider}` });
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ message: "Invalid credentials" });
-
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    res
-      .cookie("accessToken", accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "Lax",
-      })
-      .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "Lax",
-      })
-      .json({
-        user: {
-          id: user._id,
-          name: user.name,
-          slug: user.slug,
-          role: user.role,
-        },
-      });
-  } catch (err) {
-    console.error("Login Error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
+        if (user && (await user.matchPassword(password))) {
+            res.json({
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                token: generateToken(user._id),
+            });
+        } else {
+            res.status(401).json({ message: 'Invalid email or password' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error' });
+    }
 };
 
-// Logout
-exports.logout = (req, res) => {
-  res
-    .clearCookie("accessToken")
-    .clearCookie("refreshToken")
-    .status(200)
-    .json({ message: "Logged out successfully" });
+// @desc    Authenticate user with Google
+// @route   POST /api/auth/google-login
+exports.googleLogin = async (req, res) => {
+    const { tokenId } = req.body;
+    try {
+        const ticket = await googleClient.verifyIdToken({
+            idToken: tokenId,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        const { name, email, sub } = ticket.getPayload();
+
+        let user = await User.findOne({ email });
+
+        if (!user) {
+            // Create a new user if they don't exist
+            user = await User.create({
+                name,
+                email,
+                googleId: sub,
+            });
+        }
+
+        res.json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            token: generateToken(user._id),
+        });
+    } catch (error) {
+        console.error('Google Auth Error:', error);
+        res.status(401).json({ message: 'Google authentication failed' });
+    }
 };
 
-// Get current user from cookie
-exports.getCurrentUser = async (req, res) => {
-  const token = req.cookies.accessToken;
-  if (!token) return res.sendStatus(401);
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select("-password");
-    if (!user) return res.sendStatus(404);
+// @desc    Forgot password - generates token and sends email
+// @route   POST /api/auth/forgot-password
+exports.forgotPassword = async (req, res) => {
+    const { email } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) {
+            // Note: Don't reveal that the user doesn't exist for security reasons
+            return res.status(200).json({ message: 'Email sent' });
+        }
+        
+        const resetToken = crypto.randomBytes(20).toString('hex');
 
-    res.json({ user });
-  } catch (err) {
-    res.sendStatus(403);
-  }
+        // Hash token and set to user model
+        user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+        
+        await user.save({ validateBeforeSave: false });
+
+        const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
+        const message = `You are receiving this email because you (or someone else) have requested the reset of a password for your DevStash account.\n\nPlease click on the following link, or paste it into your browser to complete the process within 15 minutes of receiving it:\n\n${resetUrl}\n\nIf you did not request this, please ignore this email and your password will remain unchanged.`;
+        
+        const transporter = nodemailer.createTransport({
+            host: process.env.EMAIL_HOST,
+            port: process.env.EMAIL_PORT,
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASS,
+            },
+        });
+
+        await transporter.sendMail({
+            from: '"DevStash Support" <noreply@devstash.com>',
+            to: user.email,
+            subject: 'DevStash Password Reset Request',
+            text: message,
+        });
+
+        res.status(200).json({ message: 'Email sent' });
+    } catch (error) {
+        console.error(error);
+        // Clear the token fields on error to prevent a user being locked out
+        const user = await User.findOne({ email: req.body.email });
+        if (user) {
+            user.resetPasswordToken = undefined;
+            user.resetPasswordExpires = undefined;
+            await user.save({ validateBeforeSave: false });
+        }
+        res.status(500).json({ message: 'Error sending email' });
+    }
+};
+
+// @desc    Reset password
+// @route   POST /api/auth/reset-password
+exports.resetPassword = async (req, res) => {
+    const { token, password } = req.body;
+
+    // Get hashed token
+    const resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    try {
+        const user = await User.findOne({
+            resetPasswordToken,
+            resetPasswordExpires: { $gt: Date.now() },
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid or expired token' });
+        }
+
+        // Set new password
+        user.password = password;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
+        await user.save();
+
+        res.status(200).json({ message: 'Password reset successful' });
+    } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
 };

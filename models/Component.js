@@ -1,63 +1,51 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
-const componentSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
+const componentSchema = new mongoose.Schema({
+    user: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        required: true, 
+        ref: 'User' // Creates a reference to the User model
     },
-    slug: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
+    name: { 
+        type: String, 
+        required: true 
     },
-    description: {
-      type: String,
-      default: "",
+    image: { 
+        type: String, 
+        required: true // This will store the URL from Cloudinary
     },
-    image: {
-      type: String, // Cloudinary URL
-      default: "",
+    version: { 
+        type: String, 
+        default: '1.0.0' 
     },
-    version: {
-      type: String,
-      default: "1.0.0",
+    tags: { 
+        type: [String], 
+        default: [] 
     },
-    tags: {
-      type: [String],
-      default: [],
+    description: { 
+        type: String 
     },
-    commands: {
-      type: String,
-      default: "",
+    commands: { 
+        type: String 
     },
-    fileType: {
-      type: String,
-      default: "js", // fallback fileType for the main file
+    filename: { 
+        type: String 
     },
-    codeFiles: [
-      {
-        filename: { type: String, required: true },
-        fileType: { type: String, required: true },
-        code: { type: String, required: true },
-      },
-    ],
-    creator: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+    filetype: { 
+        type: String, 
+        required: true 
     },
+    code: { 
+        type: String, 
+        required: true 
+    },
+    remixedFrom: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'Component' // Reference to another component if it's a remix
+    },
+}, { 
+    timestamps: true // Automatically adds createdAt and updatedAt fields
+});
 
-    // ✅ Reference to original component (if remixed)
-    remixedFrom: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Component",
-      default: null,
-    },
-  },
-  { timestamps: true }
-);
-
-module.exports = mongoose.model("Component", componentSchema);
+const Component = mongoose.model('Component', componentSchema);
+module.exports = Component;

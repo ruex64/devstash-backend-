@@ -1,177 +1,140 @@
-const Component = require("../models/Component");
-const slugify = require("slugify");
+const Component = require('../models/Component');
 
-// Generate a unique slug
-const generateUniqueSlug = async (name) => {
-  const baseSlug = slugify(name, { lower: true, strict: true });
-  let slug = baseSlug;
-  let count = 1;
-
-  while (await Component.findOne({ slug })) {
-    slug = `${baseSlug}-${count}`;
-    count++;
-  }
-
-  return slug;
-};
-
-// ✅ 1. Create a new component (not remix)
+// @desc    Create a new component
+// @route   POST /api/components
 exports.createComponent = async (req, res) => {
-  try {
-    const {
-      name,
-      tags = [],
-      image,
-      version = "1.0.0",
-      commands = "",
-      description = "",
-      codeFiles = [],
-    } = req.body;
+    try {
+        const { name, version, tags, description, commands, filename, filetype, code, remixedFrom } = req.body;
 
-    if (!name || !Array.isArray(codeFiles) || codeFiles.length === 0) {
-      return res.status(400).json({ message: "Name and at least one code file are required." });
-    }
-
-    for (const file of codeFiles) {
-      if (!file.filename || !file.fileType || !file.code) {
-        return res.status(400).json({
-          message: "Each code file must include filename, fileType, and code.",
-        });
-      }
-    }
-
-    const slug = await generateUniqueSlug(name);
-
-    const component = await Component.create({
-      name,
-      slug,
-      description,
-      image,
-      tags: Array.isArray(tags) ? tags : tags.split(",").map((t) => t.trim()),
-      version,
-      commands,
-      fileType: codeFiles[0]?.fileType || "js",
-      codeFiles,
-      creator: req.user.id || req.user._id,
-    });
-
-    res.status(201).json(component);
-  } catch (error) {
-    console.error("Create Component Error:", error);
-    res.status(500).json({ message: "Failed to create component" });
-  }
-};
-
-// Remix a component
-exports.remixComponent = async (req, res) => {
-  try {
-    const { slug } = req.params;
-
-    const original = await Component.findOne({ slug });
-    if (!original) {
-      return res.status(404).json({ message: "Original component not found" });
-    }
-
-    const {
-      name,
-      tags = [],
-      image = original.image,
-      version = "1.0.0",
-      commands = original.commands,
-      description = original.description,
-      codeFiles = original.codeFiles,
-    } = req.body;
-
-    if (!name || !Array.isArray(codeFiles) || codeFiles.length === 0) {
-      return res.status(400).json({ message: "Name and at least one code file are required." });
-    }
-
-    const newSlug = await generateUniqueSlug(name);
-
-    const remix = await Component.create({
-      name,
-      slug: newSlug,
-      description,
-      image,
-      tags: Array.isArray(tags) ? tags : tags.split(",").map((t) => t.trim()),
-      version,
-      commands,
-      fileType: codeFiles[0]?.fileType || "js",
-      codeFiles,
-      creator: req.user.id || req.user._id,
-      remixedFrom: original._id,
-    });
-
-    res.status(201).json(remix);
-  } catch (err) {
-    console.error("Remix Component Error:", err);
-    res.status(500).json({ message: "Failed to remix component" });
-  }
-};
-
-
-// ✅ 3. Get All Components
-exports.getAllComponents = async (req, res) => {
-  try {
-    const search = req.query.search || "";
-    const searchRegex = new RegExp(search, "i");
-
-    const query = search
-      ? {
-          $or: [{ name: searchRegex }, { tags: { $in: [search] } }],
+        if (!req.file) {
+            return res.status(400).json({ message: 'An image upload is required.' });
         }
-      : {};
+        
+        const tagsArray = tags ? tags.split(',').map(tag => tag.trim()) : [];
 
-    const components = await Component.find(query).populate("creator", "name avatar");
-    res.json(components);
-  } catch (error) {
-    console.error("Get All Components Error:", error);
-    res.status(500).json({ message: "Failed to fetch components" });
-  }
-};
+        const component = new Component({
+            user: req.user._id,
+            name,
+            version,
+            tags: tagsArray,
+            description,
+            commands,
+            filename,
+            filetype,
+            code,
+            remixedFrom: remixedFrom || null,
+            image: req.file.path // The URL from Cloudinary
+        });
 
-// ✅ 4. Get a Component by Slug (with remix origin info)
-exports.getComponentBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-
-    const component = await Component.findOne({ slug })
-      .populate("creator", "name avatar")
-      .populate("remixedFrom", "name slug");
-
-    if (!component) {
-      return res.status(404).json({ message: "Component not found" });
+        const createdComponent = await component.save();
+        res.status(201).json(createdComponent);
+    } catch (error) {
+        console.error(error);
+        res.status(400).json({ message: 'Error creating component', error: error.message });
     }
-
-    res.json(component);
-  } catch (error) {
-    console.error("Get Component Error:", error);
-    res.status(500).json({ message: "Failed to fetch component" });
-  }
 };
 
-// ✅ 5. Delete Component
+// @desc    Get all components (with search and pagination)
+// @route   GET /api/components
+exports.getComponents = async (req, res) => {
+    try {
+        const keyword = req.query.keyword ? {
+            $or: [
+                { name: { $regex: req.query.keyword, $options: 'i' } },
+                { tags: { $regex: req.query.keyword, $options: 'i' } },
+                { description: { $regex: req.query.keyword, $options: 'i' } }
+            ]
+        } : {};
+
+        const components = await Component.find({ ...keyword })
+            .populate('user', 'name') // Populate user's name
+            .sort({ createdAt: -1 }); // Sort by newest first
+            
+        res.json(components);
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    Get a single component by ID
+// @route   GET /api/components/:id
+exports.getComponentById = async (req, res) => {
+    try {
+        const component = await Component.findById(req.params.id)
+            .populate('user', 'name email')
+            .populate('remixedFrom', 'name'); // Also populate the original component's name if remixed
+
+        if (component) {
+            res.json(component);
+        } else {
+            res.status(404).json({ message: 'Component not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+
+// @desc    Update a component
+// @route   PUT /api/components/:id
+exports.updateComponent = async (req, res) => {
+    try {
+        const component = await Component.findById(req.params.id);
+
+        if (!component) {
+            return res.status(404).json({ message: 'Component not found' });
+        }
+
+        // Check permissions: User must be admin or the owner of the component
+        if (req.user.role !== 'admin' && component.user.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: 'User not authorized to update this component' });
+        }
+
+        const { name, version, tags, description, commands, filename, filetype, code } = req.body;
+        
+        component.name = name || component.name;
+        component.version = version || component.version;
+        component.description = description || component.description;
+        component.commands = commands || component.commands;
+        component.filename = filename || component.filename;
+        component.filetype = filetype || component.filetype;
+        component.code = code || component.code;
+        if (tags) {
+            component.tags = tags.split(',').map(tag => tag.trim());
+        }
+        if (req.file) {
+            // Here you might want to delete the old image from Cloudinary first
+            component.image = req.file.path;
+        }
+
+        const updatedComponent = await component.save();
+        res.json(updatedComponent);
+
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+
+// @desc    Delete a component
+// @route   DELETE /api/components/:id
 exports.deleteComponent = async (req, res) => {
-  try {
-    const { slug } = req.params;
+    try {
+        const component = await Component.findById(req.params.id);
 
-    const component = await Component.findOne({ slug });
-    if (!component) {
-      return res.status(404).json({ message: "Component not found" });
+        if (!component) {
+            return res.status(404).json({ message: 'Component not found' });
+        }
+
+        // Check permissions: User must be admin or the owner of the component
+        if (req.user.role === 'admin' || component.user.toString() === req.user._id.toString()) {
+            await component.remove();
+            // Optional: Delete the image from Cloudinary as well
+            res.json({ message: 'Component removed successfully' });
+        } else {
+            return res.status(403).json({ message: 'User not authorized to delete this component' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error' });
     }
-
-    const isAdmin = req.user.role === "admin";
-    const isOwner = component.creator.toString() === (req.user.id || req.user._id);
-
-    if (!isAdmin && !isOwner) {
-      return res.status(403).json({ message: "Unauthorized to delete this component" });
-    }
-
-    await Component.deleteOne({ _id: component._id });
-
-    res.status(200).json({ message: "Component deleted successfully" });
-  } catch (error) {
-    console.error("Delete Component Error:", error);
-    res.status(500).json({ message: "Failed to delete component" });
-  }
 };

@@ -1,35 +1,58 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
-const userSchema = new mongoose.Schema(
-  {
-    name: String,
-    slug: { type: String, unique: true }, // 👈 Add this
-    email: { type: String, unique: true, required: true },
-    password: { type: String },
-    avatar: String,
+const userSchema = new mongoose.Schema({
+    name: { 
+        type: String, 
+        required: true 
+    },
+    email: { 
+        type: String, 
+        required: true, 
+        unique: true 
+    },
+    password: { 
+        type: String 
+        // Password is not required for users signing up with Google
+    },
+    googleId: { 
+        type: String 
+    },
     role: {
-      type: String,
-      enum: ["viewer", "collaborator", "admin"],
-      default: "viewer",
+        type: String,
+        enum: ['viewer', 'collaborator', 'admin'], // Defines the possible roles
+        default: 'viewer', // Default role for new users
     },
-    provider: {
-      type: String,
-      enum: ["local", "google", "github"],
-      default: "local",
+    bio: { 
+        type: String, 
+        default: '' 
     },
-    bio: {
-      type: String,
-      default: "",
+    socials: {
+        github: { type: String, default: '' },
+        twitter: { type: String, default: '' },
+        linkedin: { type: String, default: '' },
     },
-    social: {
-      github: { type: String, default: "" },
-      linkedin: { type: String, default: "" },
-      instagram: { type: String, default: "" },
-      blog: { type: String, default: "" },
-      email: { type: String, default: "" },
-    },
-  },
-  { timestamps: true }
-);
+    resetPasswordToken: String,
+    resetPasswordExpires: Date,
+}, { 
+    timestamps: true // Automatically adds createdAt and updatedAt fields
+});
 
-module.exports = mongoose.model("User", userSchema);
+// Middleware to hash password before saving a new user
+userSchema.pre('save', async function (next) {
+    // Only hash the password if it has been modified (or is new) and exists
+    if (!this.isModified('password') || !this.password) {
+        return next();
+    }
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+});
+
+// Method to compare entered password with the hashed password in the database
+userSchema.methods.matchPassword = async function (enteredPassword) {
+    return await bcrypt.compare(enteredPassword, this.password);
+};
+
+const User = mongoose.model('User', userSchema);
+module.exports = User;
